@@ -73,6 +73,9 @@ public class KubernetesCredentialProvider extends CredentialsProvider implements
     /** Map of Credentials keyed by their credential ID */
     private ConcurrentHashMap<String, IdCredentials> credentials = new ConcurrentHashMap<>();
 
+    /** Map of Credentials to the Folder Scope they are available in, keyed by credential ID */
+    private ConcurrentHashMap<String, String> credentialFolderScopes = new ConcurrentHashMap<>();
+
     @CheckForNull
     private KubernetesClient client;
     @CheckForNull
@@ -115,12 +118,14 @@ public class KubernetesCredentialProvider extends CredentialsProvider implements
             LOG.log(Level.FINER, "retrieving secrets");
             SecretList list = _client.secrets().withLabelSelector(selector).withLabel(SecretUtils.JENKINS_IO_CREDENTIALS_TYPE_LABEL).list();
             ConcurrentHashMap<String, IdCredentials> _credentials = new  ConcurrentHashMap<>();
+            ConcurrentHashMap<String, String> _credentialFolderScopes = new  ConcurrentHashMap<>();
             List<Secret> secretList = list.getItems();
             for (Secret s : secretList) {
                 LOG.log(Level.FINE, "Secret Added - {0}", SecretUtils.getCredentialId(s));
-                addSecret(s, _credentials);
+                addSecret(s, _credentials, _credentialFolderScopes);
             }
             credentials = _credentials;
+            credentialFolderScopes = _credentialFolderScopes;
 
             // start watching new secrets before we list the current set of secrets so we don't miss any events
             LOG.log(Level.FINER, "registering watch");
@@ -189,6 +194,15 @@ public class KubernetesCredentialProvider extends CredentialsProvider implements
         if (ACL.SYSTEM.equals(authentication)) {
             ArrayList<C> list = new ArrayList<>();
             for (IdCredentials credential : credentials.values()) {
+                if (credentialFolderScopes.get(credential.getId()) != null){
+                    String folderScope = credentialFolderScopes.get(credential.getId());
+                    LOG.log(Level.FINEST, "getCredentials: {0} has folder scoping annotation, checking if item group in scope", credential.getId());
+                    Boolean inScope = SecretUtils.checkItemGroupIsInFolderScope(itemGroup.getUrl(), folderScope);
+                    if (!inScope){
+                        LOG.log(Level.FINEST, "itemGroup {0} not in scope: {1}", new Object[] {itemGroup.getUrl(), folderScope});
+                        continue;
+                    }
+                }
                 // is s a type of type then populate the list...
                 LOG.log(Level.FINEST, "getCredentials {0} is a possible candidate", credential.getId());
                 if (type.isAssignableFrom(credential.getClass())) {
@@ -211,14 +225,20 @@ public class KubernetesCredentialProvider extends CredentialsProvider implements
     }
 
     private void addSecret(Secret secret) {
-        addSecret(secret, credentials);
+        addSecret(secret, credentials, credentialFolderScopes);
     }
 
-    private void addSecret(Secret secret, Map<String, IdCredentials> map) {
+    private void addSecret(Secret secret, Map<String, IdCredentials> map, Map<String, String> folderScopes) {
         IdCredentials cred = convertSecret(secret);
+        String credentialId = SecretUtils.getCredentialId(secret);
         if (cred != null) {
-            map.put(SecretUtils.getCredentialId(secret), cred);
+            map.put(credentialId, cred);
+            String folderScope = SecretUtils.getCredentialFolderScope(secret);
+            if (folderScope !=  null){
+                folderScopes.put(credentialId, folderScope);
+            }
         }
+
     }
 
     @Override
@@ -238,6 +258,7 @@ public class KubernetesCredentialProvider extends CredentialsProvider implements
             case DELETED: {
                 LOG.log(Level.FINE, "Secret Deleted - {0}", credentialId);
                 credentials.remove(credentialId);
+                credentialFolderScopes.remove(credentialId);
                 break;
             }
             case ERROR: {

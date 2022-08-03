@@ -58,6 +58,8 @@ public abstract class SecretUtils {
     /** Annotation prefix for the optional custom mapping of data */
     private static final String JENKINS_IO_CREDENTIALS_KEYBINDING_ANNOTATION_PREFIX = "jenkins.io/credentials-keybinding-";
 
+    private static final String JENKINS_IO_CREDENTIALS_FOLDER_ANNOTATION = "jenkins.io/credentials-folder";
+
     static final String JENKINS_IO_CREDENTIALS_TYPE_LABEL = "jenkins.io/credentials-type";
 
     static final String JENKINS_IO_CREDENTIALS_SCOPE_LABEL = "jenkins.io/credentials-scope";
@@ -145,6 +147,40 @@ public abstract class SecretUtils {
             return annotations.get(JENKINS_IO_CREDENTIALS_DESCRIPTION_ANNOTATION);
         }
         return null;
+    }
+
+    /**
+     * Obtain the credential folder scope from a given {@code Secret}.
+     * @param s the secret whose folder scope we want to obtain.
+     * @return the credential folder scope for a given secret.
+     */
+    @CheckForNull
+    public static String getCredentialFolderScope(Secret s) {
+        // we must have a metadata as the label that identifies this as a Jenkins credential needs to be present
+        Map<String, String> annotations = s.getMetadata().getAnnotations();
+        if (annotations != null) {
+            return annotations.get(JENKINS_IO_CREDENTIALS_FOLDER_ANNOTATION);
+        }
+        return null;
+    }
+
+    /**
+     * Obtain the credential folder scope from a given {@code Secret}.
+     * @param itemGroupUrl the url of the item group we want to check against the folder scope.
+     * @param folderScope the folder scope that we are checking the itemGroupUrl against
+     * @return true if the item group is in the folder scope.
+     */
+    public static Boolean checkItemGroupIsInFolderScope(String itemGroupURL, String folderScope){
+        String[] scopeSubFolders = folderScope.split("/");
+        String[] itemGroupSubFolders = itemGroupURL.split("/");
+        Integer idx = 0;
+        for(String scopeFolder : scopeSubFolders){
+            if (scopeFolder != itemGroupSubFolders[idx]){
+                return false;
+            }
+            idx++;
+        }
+        return true;
     }
 
     /**
